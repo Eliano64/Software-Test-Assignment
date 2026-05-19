@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 
 from fastapi import FastAPI
 from fastapi import HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 try:
     from openai import OpenAI
@@ -22,6 +22,11 @@ class GenerateRequest(BaseModel):
     promptMode: str = "default"
     customPrompt: str = ""
     documents: List[Dict[str, str]] = []
+    includeWhitebox: bool = False
+    includeOracle: bool = False
+    includeOptimization: bool = False
+    whiteboxDescription: str = ""
+    coverageCriterion: str = "all-states"
 
 
 class TestCase(BaseModel):
@@ -33,16 +38,24 @@ class TestCase(BaseModel):
     input: str
     steps: str
     expected: str
+    oracle: str = ""
     priority: str
+    traceability: List[str] = []
 
 
 class TestArtifacts(BaseModel):
-    inputVariables: List[str]
-    equivalencePartitions: List[Dict[str, str]]
-    boundaryValues: List[Dict[str, Any]]
-    decisionTableRules: List[Dict[str, str]]
-    missingItems: List[str]
-    assumptions: List[str]
+    inputVariables: List[str] = Field(default_factory=list)
+    equivalencePartitions: List[Dict[str, str]] = Field(default_factory=list)
+    boundaryValues: List[Dict[str, Any]] = Field(default_factory=list)
+    decisionTableRules: List[Dict[str, str]] = Field(default_factory=list)
+    missingItems: List[str] = Field(default_factory=list)
+    assumptions: List[str] = Field(default_factory=list)
+    requirementsStructured: List[Dict[str, Any]] = Field(default_factory=list)
+    coverageItems: List[str] = Field(default_factory=list)
+    riskItems: List[Dict[str, Any]] = Field(default_factory=list)
+    stateModel: Dict[str, Any] = Field(default_factory=dict)
+    testSuiteOptimization: Dict[str, Any] = Field(default_factory=dict)
+    traceability: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class GenerateResponse(BaseModel):
@@ -68,8 +81,33 @@ ALLOWED_METHODS = [
     "DecisionTable",
 ]
 
-PROMPT_VERSION = "bb-v2.2-assignment1"
+PROMPT_VERSION = "autotestdesign-v4-fitnessai-assignment"
 ENABLE_PARSE_FALLBACK = os.getenv("ENABLE_PARSE_FALLBACK", "false").strip().lower() == "true"
+
+TARGET_APP_CONTEXT = (
+    "Target application is FitnessAI: a real-time fitness assistant with MediaPipe Pose landmarks, "
+    "/api/analytics/pose posture analysis, exercise state machines, training plans, record filtering, "
+    "history/dashboard analytics, BMI and calorie estimation. All generated risks, test plans, "
+    "coverage items and testcases must target FitnessAI, not the AutoTestDesign tool itself.\n"
+)
+
+ASSIGNMENT_TEST_DESIGN_GUIDANCE = (
+    "Assignment-derived obligations for the LLM output: structure the imported FitnessAI requirements; "
+    "identify coverage items and traceability for interactive designer review; assign risk score and "
+    "priority to key target-application requirements; generate black-box testcases using at least "
+    "equivalence partitioning, boundary value analysis and decision table testing; include state-transition "
+    "modeling when behavior has states; synthesize concrete test oracles; and provide a structured JSON "
+    "artifact that can be exported. Treat input/import capability and export UI capability as tool features "
+    "already handled by AutoTestDesign, not as FitnessAI requirements to test.\n"
+)
+
+FITNESSAI_TEST_FOCUS = (
+    "FitnessAI test focus: exerciseType valid/invalid classes for SQUAT, PUSHUP, PLANK and JUMPING_JACK; "
+    "landmarks length and visibility boundaries including 32, 33 and 34 points; pose response fields "
+    "count, score, feedback, state and angle; complete versus illegal state-machine cycles and cooldown; "
+    "record filtering rule count < 3 && durationSeconds < 30; plan difficulty, set/rep/rest and skip-rest "
+    "flows; dashboard refresh, activity distribution and calorie oracle using MET * weightKg * durationHours.\n"
+)
 
 
 def _compose_content(content: str, documents: List[Dict[str, str]]) -> str:
@@ -98,43 +136,339 @@ def build_prompt(source_type: str, content: str, prompt_mode: str = "default", c
     if prompt_mode == "custom" and str(custom_prompt).strip():
         return (
             f"{str(custom_prompt).strip()}\n\n"
+            f"{TARGET_APP_CONTEXT}"
+            f"{ASSIGNMENT_TEST_DESIGN_GUIDANCE}"
             "Output requirements (MUST follow):\n"
             "- Return JSON object only.\n"
-            "- black-box only. Allowed methods: EP, BVA, Combinatorial, StateTransition, DecisionTable.\n"
-            "- Include testcases with fields: id, technique, designMethod, title, precondition, input, steps, expected, priority.\n"
+            "- Include black-box testcases. Allowed methods: EP, BVA, Combinatorial, StateTransition, DecisionTable.\n"
+            "- Include requirementsStructured, coverageItems, riskItems, stateModel, testSuiteOptimization, traceability.\n"
+            "- Include testcases with fields: id, technique, designMethod, title, precondition, input, steps, expected, oracle, priority, traceability.\n"
+            "- Keep testcase input values compact. Do not enumerate landmark objects; describe them as \"32/33/34 valid landmark objects\".\n"
+            f"{FITNESSAI_TEST_FOCUS}"
             f"sourceType: {source_type}\n"
             f"content:\n{content[:6000]}"
         )
 
     return (
-        "You are an expert software testing assistant for dynamic black-box testing. "
-        "You must follow Assignment1 requirements and generate submission-ready artifacts.\n"
-        "Testing technique is strictly black-box only. Allowed methods: "
-        "EP, BVA, Combinatorial, StateTransition, DecisionTable.\n"
-        "Do NOT include static testing or white-box content.\n"
+        "You are an expert software testing assistant for AutoTestDesign. "
+        "Generate submission-ready testing artifacts for the chosen target application.\n"
+        f"{TARGET_APP_CONTEXT}"
+        f"{ASSIGNMENT_TEST_DESIGN_GUIDANCE}"
+        "Use the provided content as the source of requirements; if details are missing, state assumptions.\n"
+        "Testing techniques: black-box is required; include white-box modeling when asked. "
+        "Allowed black-box methods: EP, BVA, Combinatorial, StateTransition, DecisionTable.\n"
         "Return JSON object only with this exact schema:\n"
         "{\n"
         '  "inputVariables": ["..."],\n'
         '  "equivalencePartitions": [{"id":"EP1","description":"...","type":"valid|invalid","expected":"..."}],\n'
         '  "boundaryValues": [{"field":"...","values":["..."],"rationale":"..."}],\n'
         '  "decisionTableRules": [{"conditions":"...","actions":"...","expected":"..."}],\n'
-        '  "testcases": [{"id":"TC-BB-001","technique":"black-box","designMethod":"EP|BVA|Combinatorial|StateTransition|DecisionTable","title":"...","precondition":"...","input":"...","steps":"...","expected":"...","priority":"high|medium|low"}],\n'
+        '  "requirementsStructured": [{"id":"REQ-1","feature":"...","inputFields":["..."],"ranges":{},"conditions":["..."],"expectedAction":"..."}],\n'
+        '  "coverageItems": ["..."],\n'
+        '  "riskItems": [{"reqId":"REQ-1","impact":1,"likelihood":1,"riskScore":1,"priority":"high|medium|low","rationale":"..."}],\n'
+        '  "stateModel": {"states":[],"transitions":[],"coverageCriterion":"all-states|all-transitions"},\n'
+        '  "testSuiteOptimization": {"mode":"risk-first|minimize","optimizedSuite":["TC-..."],"removedCases":["TC-..."]},\n'
+        '  "traceability": [{"reqId":"REQ-1","coverageItems":["..."],"testcases":["TC-..."]}],\n'
+        '  "testcases": [{"id":"TC-BB-001","technique":"black-box","designMethod":"EP|BVA|Combinatorial|StateTransition|DecisionTable","title":"...","precondition":"...","input":"...","steps":"...","expected":"...","oracle":"...","priority":"high|medium|low","traceability":["REQ-..."]}],\n'
         '  "missingItems": ["unclear requirement ..."],\n'
         '  "assumptions": ["assumption ..."]\n'
         "}\n"
         "Constraints:\n"
-        "1) Generate 8-12 testcases.\n"
+        "1) Generate testcases.\n"
         "2) Cover all five black-box methods, at least one testcase each.\n"
-        "3) Prefer concrete API-level or behavior-level checks.\n"
-        "4) Include edge cases and invalid inputs.\n"
-        "5) IDs must be unique and stable.\n"
+        "3) Prefer concrete API-level or behavior-level checks for /api/analytics/pose, record saving, training plan and dashboard.\n"
+        "4) Include edge cases and invalid inputs, especially landmark count 32/33/34 and record filtering count<3 & duration<30.\n"
+        "5) Include risk score, priority and traceability from requirements to coverage items to testcases.\n"
+        "6) IDs must be unique and stable.\n"
+        "7) Strict JSON only: do not use Python/JavaScript expressions, list comprehensions, comments, trailing commas, or ellipsis. "
+        "For repeated landmarks, write a descriptive string such as \"33 valid landmark objects\" instead of [{...} for _ in range(33)].\n"
+        "8) Keep testcase input values compact. Do not enumerate landmark objects; describe them as "
+        "\"32 valid landmark objects\", \"33 valid landmark objects\", or \"34 valid landmark objects\".\n"
+        f"{FITNESSAI_TEST_FOCUS}"
         f"sourceType: {source_type}\n"
         f"content:\n{content[:6000]}"
     )
 
 
+KNOWN_OUTPUT_KEYS = {
+    "inputVariables",
+    "equivalencePartitions",
+    "boundaryValues",
+    "decisionTableRules",
+    "requirementsStructured",
+    "coverageItems",
+    "riskItems",
+    "stateModel",
+    "testSuiteOptimization",
+    "traceability",
+    "testcases",
+    "missingItems",
+    "assumptions",
+}
+
+KEY_ALIASES = {
+    "testCases": "testcases",
+    "test_cases": "testcases",
+    "cases": "testcases",
+    "requirements": "requirementsStructured",
+    "structuredRequirements": "requirementsStructured",
+    "coverage": "coverageItems",
+    "risks": "riskItems",
+    "riskAnalysis": "riskItems",
+    "state_model": "stateModel",
+    "suiteOptimization": "testSuiteOptimization",
+    "testSuite": "testSuiteOptimization",
+}
+
+WRAPPER_KEYS = ("data", "artifacts", "artifact", "result", "output", "response")
+
+
+def _payload_fragments(payload: Any) -> List[Any]:
+    fragments = [payload]
+    if not isinstance(payload, dict):
+        return fragments
+
+    for wrapper_key in WRAPPER_KEYS:
+        wrapped = payload.get(wrapper_key)
+        if isinstance(wrapped, (dict, list)):
+            fragments.extend(_payload_fragments(wrapped))
+
+    return fragments
+
+
+def _merge_payloads(payloads: List[Any]):
+    merged: Dict[str, Any] = {}
+    for payload in payloads:
+        for fragment in _payload_fragments(payload):
+            if isinstance(fragment, list):
+                if fragment and all(isinstance(item, dict) for item in fragment):
+                    merged.setdefault("testcases", [])
+                    merged["testcases"].extend(fragment)
+                continue
+
+            if not isinstance(fragment, dict):
+                continue
+
+            for key, value in fragment.items():
+                canonical_key = KEY_ALIASES.get(key, key)
+                if canonical_key not in KNOWN_OUTPUT_KEYS:
+                    continue
+                if isinstance(value, list):
+                    merged.setdefault(canonical_key, [])
+                    if isinstance(merged[canonical_key], list):
+                        merged[canonical_key].extend(value)
+                    else:
+                        merged[canonical_key] = value
+                elif isinstance(value, dict):
+                    current = merged.get(canonical_key)
+                    if isinstance(current, dict):
+                        merged[canonical_key] = {**current, **value}
+                    else:
+                        merged[canonical_key] = value
+                elif canonical_key not in merged:
+                    merged[canonical_key] = value
+
+    return merged or None
+
+
+def _loads_json_candidate(candidate: str):
+    candidate = str(candidate or "").strip()
+    if not candidate:
+        return None
+    try:
+        return json.loads(candidate)
+    except Exception:
+        pass
+
+    repaired = _repair_json_candidate(candidate)
+    if repaired != candidate:
+        try:
+            return json.loads(repaired)
+        except Exception:
+            return None
+
+    return None
+
+
+def _repair_json_candidate(candidate: str) -> str:
+    repaired = str(candidate or "").strip()
+    repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
+    repaired = re.sub(r"\bNone\b", "null", repaired)
+    repaired = re.sub(r"\bTrue\b", "true", repaired)
+    repaired = re.sub(r"\bFalse\b", "false", repaired)
+    # Some LLMs put Python list comprehensions inside JSON examples.
+    repaired = re.sub(
+        r"\[\s*(\{[^][]*?\})\s+for\s+_\s+in\s+range\(\s*(\d+)\s*\)\s*\]",
+        lambda match: f'["{match.group(2)} repeated objects: {match.group(1).replace(chr(34), chr(39))}"]',
+        repaired,
+        flags=re.DOTALL,
+    )
+    repaired = re.sub(
+        r"\[\s*([\"'][^][]*?[\"'])\s+for\s+_\s+in\s+range\(\s*(\d+)\s*\)\s*\]",
+        lambda match: f'["{match.group(2)} repeated values: {match.group(1).strip(chr(34)).strip(chr(39))}"]',
+        repaired,
+        flags=re.DOTALL,
+    )
+    return repaired
+
+
+def _balanced_json_candidates(text: str) -> List[str]:
+    candidates: List[str] = []
+    stack: List[str] = []
+    start = None
+    in_string = False
+    escape = False
+    pairs = {"{": "}", "[": "]"}
+
+    for index, char in enumerate(text):
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+            continue
+
+        if char in pairs:
+            if not stack:
+                start = index
+            stack.append(pairs[char])
+            continue
+
+        if stack and char == stack[-1]:
+            stack.pop()
+            if not stack and start is not None:
+                candidates.append(text[start:index + 1])
+                start = None
+
+    return candidates
+
+
+def _balanced_json_from(text: str, start: int):
+    pairs = {"{": "}", "[": "]"}
+    opening = text[start] if 0 <= start < len(text) else ""
+    expected = pairs.get(opening)
+    if not expected:
+        return None
+
+    stack = [expected]
+    in_string = False
+    escape = False
+    for index in range(start + 1, len(text)):
+        char = text[index]
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+            continue
+        if char in pairs:
+            stack.append(pairs[char])
+            continue
+        if stack and char == stack[-1]:
+            stack.pop()
+            if not stack:
+                return text[start:index + 1]
+
+    return None
+
+
+def _extract_keyed_json_fragments(text: str) -> List[Any]:
+    # If the model response is truncated, the top-level object may be invalid while
+    # earlier fields are still complete. Recover complete known fields by key.
+    fragments: List[Any] = []
+    key_pattern = "|".join(re.escape(key) for key in list(KNOWN_OUTPUT_KEYS) + list(KEY_ALIASES.keys()))
+    for match in re.finditer(rf'"({key_pattern})"\s*:', text):
+        key = KEY_ALIASES.get(match.group(1), match.group(1))
+        index = match.end()
+        while index < len(text) and text[index].isspace():
+            index += 1
+        if index >= len(text) or text[index] not in "[{":
+            continue
+
+        candidate = _balanced_json_from(text, index)
+        parsed = _loads_json_candidate(candidate or "")
+        if parsed is not None:
+            fragments.append({key: parsed})
+        elif key == "testcases" and text[index] == "[":
+            items = _extract_complete_array_items(text, index)
+            if items:
+                fragments.append({key: items})
+
+    return fragments
+
+
+def _extract_complete_array_items(text: str, start: int) -> List[Any]:
+    items: List[Any] = []
+    index = start + 1
+    while index < len(text):
+        while index < len(text) and (text[index].isspace() or text[index] == ","):
+            index += 1
+        if index >= len(text) or text[index] == "]":
+            break
+        if text[index] not in "[{":
+            index += 1
+            continue
+
+        candidate = _balanced_json_from(text, index)
+        if not candidate:
+            break
+        parsed = _loads_json_candidate(candidate)
+        if parsed is not None:
+            items.append(parsed)
+        index += len(candidate)
+
+    return items
+
+
 def _extract_json_object(text: str):
-    # Try direct JSON first, then fallback to extracting the first JSON object block.
+    # Models often return explanations plus several JSON blocks. Parse and merge all usable pieces.
+    payloads: List[Any] = []
+    seen_candidates = set()
+
+    direct = _loads_json_candidate(text)
+    if direct is not None:
+        payloads.append(direct)
+        seen_candidates.add(str(text or "").strip())
+
+    for code_block in re.findall(r"```(?:json)?\s*([\s\S]*?)\s*```", text, re.IGNORECASE):
+        normalized_block = code_block.strip()
+        seen_candidates.add(normalized_block)
+        parsed = _loads_json_candidate(code_block)
+        if parsed is not None:
+            payloads.append(parsed)
+
+    for candidate in _balanced_json_candidates(text):
+        normalized_candidate = candidate.strip()
+        if normalized_candidate in seen_candidates:
+            continue
+        seen_candidates.add(normalized_candidate)
+        parsed = _loads_json_candidate(candidate)
+        if parsed is not None:
+            payloads.append(parsed)
+
+    payloads.extend(_extract_keyed_json_fragments(text))
+
+    merged = _merge_payloads(payloads)
+    if isinstance(merged, dict):
+        return merged
+
+    return None
+
+
+def _legacy_extract_json_object(text: str):
+    # Kept for reference of the older single-object strategy.
     try:
         payload = json.loads(text)
         if isinstance(payload, dict):
@@ -229,7 +563,9 @@ def _normalize_cases(payload, source_type: str) -> List[TestCase]:
                 input=str(item.get("input", f"sourceType={source_type}")),
                 steps=str(item.get("steps", "提交请求并观察响应")),
                 expected=str(item.get("expected", "系统行为符合规格说明")),
+                oracle=str(item.get("oracle", "")),
                 priority=str(item.get("priority", "medium")),
+                traceability=[str(value) for value in item.get("traceability", []) if str(value).strip()],
             )
         )
 
@@ -250,6 +586,18 @@ def _normalize_artifacts(payload) -> TestArtifacts:
     def _safe_list(name: str):
         value = payload.get(name, [])
         return value if isinstance(value, list) else []
+
+    def _normalize_traceability(values: List[Any]) -> List[Dict[str, Any]]:
+        normalized: List[Dict[str, Any]] = []
+        for item in values:
+            if isinstance(item, dict):
+                normalized.append(item)
+                continue
+            if isinstance(item, str):
+                ref = item.strip()
+                if ref:
+                    normalized.append({"ref": ref})
+        return normalized
 
     input_vars = [str(item) for item in _safe_list("inputVariables") if str(item).strip()]
 
@@ -298,6 +646,31 @@ def _normalize_artifacts(payload) -> TestArtifacts:
         decisionTableRules=dt_rules,
         missingItems=missing_items,
         assumptions=assumptions,
+        requirementsStructured=_safe_list("requirementsStructured"),
+        coverageItems=[str(item) for item in _safe_list("coverageItems") if str(item).strip()],
+        riskItems=_safe_list("riskItems"),
+        stateModel=payload.get("stateModel", {}) if isinstance(payload.get("stateModel", {}), dict) else {},
+        testSuiteOptimization=payload.get("testSuiteOptimization", {}) if isinstance(payload.get("testSuiteOptimization", {}), dict) else {},
+        traceability=_normalize_traceability(_safe_list("traceability")),
+    )
+
+
+def _has_artifact_content(artifacts: TestArtifacts) -> bool:
+    return any(
+        [
+            artifacts.inputVariables,
+            artifacts.equivalencePartitions,
+            artifacts.boundaryValues,
+            artifacts.decisionTableRules,
+            artifacts.missingItems,
+            artifacts.assumptions,
+            artifacts.requirementsStructured,
+            artifacts.coverageItems,
+            artifacts.riskItems,
+            artifacts.stateModel,
+            artifacts.testSuiteOptimization,
+            artifacts.traceability,
+        ]
     )
 
 
@@ -316,6 +689,7 @@ def _mock_cases(source_type: str, content: str) -> List[TestCase]:
                 input="exerciseType=SQUAT 且 landmarks 数组完整",
                 steps="提交姿势分析请求",
                 expected="返回 count、score、feedback 等字段且状态码 200",
+                oracle="HTTP 200 且字段完整",
                 priority="high",
             ),
             TestCase(
@@ -327,6 +701,7 @@ def _mock_cases(source_type: str, content: str) -> List[TestCase]:
                 input="landmarks 数量=0, 1, 32, 33, 34",
                 steps="分别提交请求并记录响应",
                 expected="33 个关键点正常，其余输入触发可解释错误",
+                oracle="33 正常，其他返回 4xx 或错误码",
                 priority="high",
             ),
             TestCase(
@@ -338,6 +713,7 @@ def _mock_cases(source_type: str, content: str) -> List[TestCase]:
                 input="exerciseType∈{SQUAT,PUSHUP,PLANK,JUMPING_JACK}, mode∈{free,plan}",
                 steps="覆盖关键组合并调用相关接口",
                 expected="每种组合均返回一致的数据结构且无 5xx",
+                oracle="HTTP 200 且返回结构一致",
                 priority="medium",
             ),
             TestCase(
@@ -349,6 +725,7 @@ def _mock_cases(source_type: str, content: str) -> List[TestCase]:
                 input="连续帧触发 UP→DESCENDING→DOWN→ASCENDING→UP",
                 steps="按状态序列提交帧数据",
                 expected="仅在完整动作循环后计数 +1，非法跃迁不计数",
+                oracle="计数仅在完整循环后增加",
                 priority="high",
             ),
             TestCase(
@@ -360,7 +737,73 @@ def _mock_cases(source_type: str, content: str) -> List[TestCase]:
                 input="次数<3 与 时长<30 秒的四种组合",
                 steps="按决策表逐条提交记录",
                 expected="仅满足有效规则的记录入库，其余被过滤",
+                oracle="无效组合入库数为 0",
                 priority="high",
+            ),
+            TestCase(
+                id="TC-BB-006",
+                technique="black-box",
+                designMethod="EP",
+                title="EP-非法运动类型输入",
+                precondition="姿态分析接口可访问",
+                input="exerciseType=YOGA 或空值，landmarks 数组完整",
+                steps="提交非法运动类型并观察错误处理",
+                expected="返回 4xx 或明确的非法运动类型错误，不进入分析器",
+                oracle="响应不得为 5xx，错误信息包含 exerciseType",
+                priority="medium",
+                traceability=["REQ-POSE-001"],
+            ),
+            TestCase(
+                id="TC-BB-007",
+                technique="black-box",
+                designMethod="BVA",
+                title="BVA-记录过滤时长边界",
+                precondition="用户记录保存接口可用",
+                input="count=2, durationSeconds=29/30/31",
+                steps="分别保存三条记录并查询历史记录",
+                expected="29 秒且次数小于 3 的记录被过滤，30/31 秒记录可保留",
+                oracle="历史记录数量和每日统计与过滤规则一致",
+                priority="high",
+                traceability=["REQ-REC-001"],
+            ),
+            TestCase(
+                id="TC-BB-008",
+                technique="black-box",
+                designMethod="DecisionTable",
+                title="决策表-计划模式难度与跳过休息",
+                precondition="训练计划模式已启用",
+                input="difficulty∈{easy,medium,hard}; skipRest∈{true,false}",
+                steps="创建计划训练，完成一组后分别跳过或等待休息",
+                expected="组数、次数和休息状态根据难度与 skipRest 正确迁移",
+                oracle="当前组、剩余次数和休息计时器符合计划配置",
+                priority="medium",
+                traceability=["REQ-PLAN-001"],
+            ),
+            TestCase(
+                id="TC-BB-009",
+                technique="black-box",
+                designMethod="Combinatorial",
+                title="组合输入-用户档案 x 运动类型 x 时长",
+                precondition="用户已配置体重并完成训练",
+                input="weight∈{50,80}, exerciseType∈{SQUAT,PUSHUP,PLANK}, duration∈{60,600}",
+                steps="保存不同组合的运动记录并刷新仪表盘",
+                expected="卡路里、趋势图和运动类型分布按组合正确更新",
+                oracle="卡路里近似满足 MET × 体重 × 时长小时",
+                priority="medium",
+                traceability=["REQ-DASH-001"],
+            ),
+            TestCase(
+                id="TC-BB-010",
+                technique="black-box",
+                designMethod="StateTransition",
+                title="状态迁移-深蹲非法短循环不计数",
+                precondition="深蹲分析器状态已重置",
+                input="连续帧序列 UP→DESCENDING→UP，未进入 DOWN",
+                steps="提交缺少 DOWN 状态的短循环帧序列",
+                expected="状态可回到 UP，但 count 不增加",
+                oracle="count 保持初始值，feedback 提示动作未完成或深度不足",
+                priority="high",
+                traceability=["REQ-POSE-002"],
             ),
         ]
 
@@ -452,6 +895,126 @@ def _mock_artifacts(content: str) -> TestArtifacts:
             ],
             missingItems=["未明确输入字段单位与取值范围"],
             assumptions=["landmarks 由上游姿势识别模块保证格式"],
+            requirementsStructured=[
+                {
+                    "id": "REQ-POSE-001",
+                    "feature": "姿态分析",
+                    "inputFields": ["exerciseType", "landmarks"],
+                    "ranges": {"landmarks.length": "33"},
+                    "conditions": ["exerciseType in supported"],
+                    "expectedAction": "返回计数与评分字段",
+                },
+                {
+                    "id": "REQ-POSE-002",
+                    "feature": "状态机计数",
+                    "inputFields": ["landmark frame sequence", "exerciseType"],
+                    "ranges": {"stableFrames": ">=2", "cooldownFrames": "10"},
+                    "conditions": ["完整动作循环", "非法短循环"],
+                    "expectedAction": "仅完整循环计数，非法跃迁不计数",
+                },
+                {
+                    "id": "REQ-REC-001",
+                    "feature": "运动记录过滤",
+                    "inputFields": ["count", "durationSeconds"],
+                    "ranges": {"count": ">=0", "durationSeconds": ">=0"},
+                    "conditions": ["count < 3 and durationSeconds < 30"],
+                    "expectedAction": "无效记录不入库，有效记录进入历史与统计",
+                },
+                {
+                    "id": "REQ-PLAN-001",
+                    "feature": "训练计划模式",
+                    "inputFields": ["difficulty", "skipRest"],
+                    "ranges": {"difficulty": "easy|medium|hard"},
+                    "conditions": ["完成一组", "跳过休息"],
+                    "expectedAction": "生成对应组数、次数和休息流程",
+                },
+                {
+                    "id": "REQ-DASH-001",
+                    "feature": "仪表盘统计",
+                    "inputFields": ["weight", "exerciseType", "durationSeconds"],
+                    "ranges": {"weight": ">0", "durationSeconds": ">0"},
+                    "conditions": ["存在有效训练记录"],
+                    "expectedAction": "展示趋势、卡路里和运动分布",
+                },
+            ],
+            coverageItems=["姿态分析接口", "运动类型等价类", "关键点数量边界", "状态迁移", "记录过滤决策表", "计划模式组合", "仪表盘卡路里预言"],
+            riskItems=[
+                {
+                    "reqId": "REQ-POSE-001",
+                    "impact": 5,
+                    "likelihood": 4,
+                    "riskScore": 20,
+                    "priority": "high",
+                    "rationale": "核心功能且算法复杂",
+                },
+                {
+                    "reqId": "REQ-POSE-002",
+                    "impact": 5,
+                    "likelihood": 4,
+                    "riskScore": 20,
+                    "priority": "high",
+                    "rationale": "状态机错误会导致重复计数或漏计数",
+                },
+                {
+                    "reqId": "REQ-REC-001",
+                    "impact": 4,
+                    "likelihood": 3,
+                    "riskScore": 12,
+                    "priority": "medium",
+                    "rationale": "过滤规则错误会污染训练统计",
+                },
+                {
+                    "reqId": "REQ-DASH-001",
+                    "impact": 3,
+                    "likelihood": 3,
+                    "riskScore": 9,
+                    "priority": "medium",
+                    "rationale": "统计错误影响用户反馈和目标追踪",
+                },
+            ],
+            stateModel={
+                "states": ["UP", "DESCENDING", "DOWN", "ASCENDING", "COOLDOWN"],
+                "transitions": [
+                    {"from": "UP", "to": "DESCENDING", "condition": "angle begins decreasing"},
+                    {"from": "DESCENDING", "to": "DOWN", "condition": "angle < threshold for stable frames"},
+                    {"from": "DOWN", "to": "ASCENDING", "condition": "angle begins increasing"},
+                    {"from": "ASCENDING", "to": "UP", "condition": "angle returns above threshold and count +1"},
+                    {"from": "UP", "to": "COOLDOWN", "condition": "counted movement enters cooldown"},
+                ],
+                "coverageCriterion": "all-states",
+            },
+            testSuiteOptimization={
+                "mode": "risk-first",
+                "optimizedSuite": ["TC-BB-001", "TC-BB-002", "TC-BB-004", "TC-BB-005", "TC-BB-007", "TC-BB-010"],
+                "removedCases": [],
+            },
+            traceability=[
+                {
+                    "reqId": "REQ-POSE-001",
+                    "coverageItems": ["姿态分析接口", "运动类型等价类", "关键点数量边界"],
+                    "testcases": ["TC-BB-001", "TC-BB-002", "TC-BB-006"],
+                },
+                {
+                    "reqId": "REQ-POSE-002",
+                    "coverageItems": ["状态迁移"],
+                    "testcases": ["TC-BB-004", "TC-BB-010"],
+                },
+                {
+                    "reqId": "REQ-REC-001",
+                    "coverageItems": ["记录过滤决策表"],
+                    "testcases": ["TC-BB-005", "TC-BB-007"],
+                },
+                {
+                    "reqId": "REQ-PLAN-001",
+                    "coverageItems": ["计划模式组合"],
+                    "testcases": ["TC-BB-003", "TC-BB-008"],
+                },
+                {
+                    "reqId": "REQ-DASH-001",
+                    "coverageItems": ["仪表盘卡路里预言"],
+                    "testcases": ["TC-BB-009"],
+                },
+            ],
         )
 
     return TestArtifacts(
@@ -486,12 +1049,18 @@ def _mock_artifacts(content: str) -> TestArtifacts:
         ],
         missingItems=[],
         assumptions=["输入文本可映射为可观察行为"],
+        requirementsStructured=[],
+        coverageItems=[],
+        riskItems=[],
+        stateModel={},
+        testSuiteOptimization={},
+        traceability=[],
     )
 
 
 def _cases_to_markdown(cases: List[TestCase]) -> str:
     lines = [
-        "# 黑盒测试用例 Markdown 预览",
+        "# 自动化测试用例 Markdown 预览",
         "",
         "| ID | 设计方法 | 标题 | 优先级 | 预期结果 |",
         "| --- | --- | --- | --- | --- |",
@@ -508,8 +1077,23 @@ def _cases_to_markdown(cases: List[TestCase]) -> str:
         lines.append(f"- 输入: {item.input}")
         lines.append(f"- 步骤: {item.steps}")
         lines.append(f"- 预期: {item.expected}")
+        if item.oracle:
+            lines.append(f"- 预言: {item.oracle}")
         lines.append("")
     return "\n".join(lines)
+
+
+def _mock_response(source_type: str, merged_content: str, reason: str = "mock-fallback") -> GenerateResponse:
+    mock_cases = _mock_cases(source_type, merged_content)
+    return GenerateResponse(
+        model="mock",
+        testTechnique="black-box",
+        promptVersion=PROMPT_VERSION,
+        promptUsed=reason,
+        llmRawOutput=_cases_to_markdown(mock_cases),
+        artifacts=_mock_artifacts(merged_content),
+        testcases=mock_cases,
+    )
 
 
 @app.get("/prompt-template")
@@ -525,31 +1109,11 @@ def prompt_template():
 def generate_testcases(req: GenerateRequest):
     merged_content = _compose_content(req.content, req.documents)
 
-    if req.testTechnique != "black-box":
-        return GenerateResponse(
-            model="validator",
-            testTechnique="black-box",
-            promptVersion=PROMPT_VERSION,
-            promptUsed="validator-bypass",
-            llmRawOutput="",
-            artifacts=_mock_artifacts(merged_content),
-            testcases=[],
-        )
-
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     model = os.getenv("OPENAI_MODEL", "deepseek-chat").strip()
 
     if not api_key or OpenAI is None:
-        mock_cases = _mock_cases(req.sourceType, merged_content)
-        return GenerateResponse(
-            model="mock",
-            testTechnique="black-box",
-            promptVersion=PROMPT_VERSION,
-            promptUsed="mock-fallback",
-            llmRawOutput=_cases_to_markdown(mock_cases),
-            artifacts=_mock_artifacts(merged_content),
-            testcases=mock_cases,
-        )
+        return _mock_response(req.sourceType, merged_content, "mock-fallback:no-api-key")
 
     base_url = os.getenv("OPENAI_BASE_URL", "").strip()
     if base_url:
@@ -563,14 +1127,27 @@ def generate_testcases(req: GenerateRequest):
         prompt_mode=str(req.promptMode or "default"),
         custom_prompt=str(req.customPrompt or ""),
     )
+    if req.includeWhitebox or req.includeOracle or req.includeOptimization:
+        prompt += (
+            "\n\nAdditional requirements:\n"
+            f"- includeWhitebox: {str(req.includeWhitebox)}\n"
+            f"- includeOracle: {str(req.includeOracle)}\n"
+            f"- includeOptimization: {str(req.includeOptimization)}\n"
+            f"- whiteboxDescription: {str(req.whiteboxDescription)[:1000]}\n"
+            f"- coverageCriterion: {str(req.coverageCriterion)}\n"
+        )
 
     try:
         response = _call_llm(client, model, prompt)
         text = _extract_response_text(response)
     except Exception as error:
+        if os.getenv("DISABLE_LLM_FAILURE_FALLBACK", "false").strip().lower() != "true":
+            return _mock_response(req.sourceType, merged_content, f"mock-fallback:llm-request-failed:{error}")
         raise HTTPException(status_code=502, detail=f"LLM request failed: {error}")
 
     if not text:
+        if os.getenv("DISABLE_LLM_FAILURE_FALLBACK", "false").strip().lower() != "true":
+            return _mock_response(req.sourceType, merged_content, "mock-fallback:llm-empty-content")
         raise HTTPException(status_code=502, detail="LLM returned empty content")
 
     payload = _extract_json_object(text)
@@ -581,7 +1158,7 @@ def generate_testcases(req: GenerateRequest):
             cases = _mock_cases(req.sourceType, merged_content)
         # When fallback is disabled, keep markdown output and return empty cases.
         # This avoids request failure caused by strict JSON parsing.
-    if not artifacts.inputVariables:
+    if not _has_artifact_content(artifacts):
         artifacts = _mock_artifacts(merged_content) if ENABLE_PARSE_FALLBACK else TestArtifacts(
             inputVariables=[],
             equivalencePartitions=[],
@@ -589,13 +1166,19 @@ def generate_testcases(req: GenerateRequest):
             decisionTableRules=[],
             missingItems=[],
             assumptions=[],
+            requirementsStructured=[],
+            coverageItems=[],
+            riskItems=[],
+            stateModel={},
+            testSuiteOptimization={},
+            traceability=[],
         )
 
     rendered_raw = _cases_to_markdown(cases) if ENABLE_PARSE_FALLBACK and not _extract_json_object(text) else text
 
     return GenerateResponse(
         model=model,
-        testTechnique="black-box",
+        testTechnique=req.testTechnique or "black-box",
         promptVersion=PROMPT_VERSION,
         promptUsed=prompt,
         llmRawOutput=rendered_raw,

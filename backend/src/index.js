@@ -10,6 +10,12 @@ const app = express();
 const port = Number(process.env.PORT || 3000);
 
 const aiServiceUrl = process.env.AI_SERVICE_URL || "http://localhost:8000";
+const targetApplication = {
+  name: "FitnessAI",
+  description: "基于姿态识别、状态机计数、训练计划和数据统计的智能健身辅助系统",
+  focusModules: ["姿态分析接口", "状态机计数", "训练计划", "记录过滤", "仪表盘统计"],
+  assignmentScope: "风险分析报告、测试计划和详细测试设计均面向 FitnessAI 目标应用"
+};
 const requiredMethods = [
   "EP",
   "BVA",
@@ -18,9 +24,39 @@ const requiredMethods = [
   "DecisionTable"
 ];
 
+function normalizeDesignMethods(item) {
+  const text = [
+    item?.designMethod,
+    item?.method,
+    item?.technique,
+    item?.title,
+    item?.id,
+    ...(Array.isArray(item?.traceability) ? item.traceability : [])
+  ].map((value) => String(value || "")).join(" ");
+  const methods = new Set();
+
+  if (/\bEP\b|equivalence|等价类/i.test(text)) methods.add("EP");
+  if (/\bBVA\b|boundary|边界值/i.test(text)) methods.add("BVA");
+  if (/combinatorial|pairwise|组合/i.test(text)) methods.add("Combinatorial");
+  if (/state\s*transition|stateTransition|状态迁移|状态机/i.test(text)) methods.add("StateTransition");
+  if (/decision\s*table|decisionTable|决策表/i.test(text)) methods.add("DecisionTable");
+
+  return methods;
+}
+
+function collectDesignMethods(cases) {
+  const methods = new Set();
+  for (const item of Array.isArray(cases) ? cases : []) {
+    for (const method of normalizeDesignMethods(item)) {
+      methods.add(method);
+    }
+  }
+  return methods;
+}
+
 function analyzeBlackBoxQuality(cases) {
   const caseList = Array.isArray(cases) ? cases : [];
-  const methodsPresent = new Set(caseList.map((item) => String(item?.designMethod || "")));
+  const methodsPresent = collectDesignMethods(caseList);
   const missingMethods = requiredMethods.filter((method) => !methodsPresent.has(method));
 
   const methodCoverage = requiredMethods.length === 0
@@ -50,6 +86,50 @@ function analyzeBlackBoxQuality(cases) {
     recommendations: missingMethods.length
       ? [`补充缺失方法: ${missingMethods.join(", ")}`]
       : ["五种黑盒方法均已覆盖，可进入准确率与泛化实验"]
+  };
+}
+
+function buildAssignmentCompliance(generated, quality) {
+  const artifacts = generated?.artifacts || {};
+  const cases = Array.isArray(generated?.testcases) ? generated.testcases : [];
+  const rawOutput = String(generated?.llmRawOutput || "");
+  const traceRefs = cases.flatMap((item) => Array.isArray(item?.traceability) ? item.traceability : []).map((value) => String(value || ""));
+  const uniqueMethods = collectDesignMethods(cases);
+  const hasStructuredRequirements = (Array.isArray(artifacts.requirementsStructured) && artifacts.requirementsStructured.length > 0)
+    || /"requirementsStructured"|REQ-[A-Z0-9-]+|结构化需求/.test(rawOutput);
+  const hasRiskItems = (Array.isArray(artifacts.riskItems) && artifacts.riskItems.length > 0)
+    || /"riskItems"|R-[A-Z0-9-]+|风险分析|priority/i.test(rawOutput)
+    || cases.some((item) => ["high", "medium", "low"].includes(String(item?.priority || "").toLowerCase()))
+    || traceRefs.some((ref) => /^R-/i.test(ref));
+  const hasCoverageItems = (Array.isArray(artifacts.coverageItems) && artifacts.coverageItems.length > 0)
+    || /"coverageItems"|C-[A-Z0-9-]+|覆盖项/.test(rawOutput)
+    || traceRefs.some((ref) => /^C-/i.test(ref));
+  const hasTraceability = (Array.isArray(artifacts.traceability) && artifacts.traceability.length > 0)
+    || cases.some((item) => Array.isArray(item?.traceability) && item.traceability.length > 0)
+    || /"traceability"|追溯关系/.test(rawOutput);
+  const hasStateModel = artifacts.stateModel && Object.keys(artifacts.stateModel).length > 0;
+  const hasOptimization = artifacts.testSuiteOptimization && Object.keys(artifacts.testSuiteOptimization).length > 0;
+  const hasOracle = cases.some((item) => String(item?.oracle || "").trim());
+
+  const items = [
+    { id: "FR 1.0", label: "输入/解析", passed: true, evidence: "后端接受 content 与 documents 两类输入" },
+    { id: "FR 1.1", label: "需求结构化", passed: hasStructuredRequirements, evidence: `${artifacts.requirementsStructured?.length || 0} 条结构化需求${hasStructuredRequirements && !artifacts.requirementsStructured?.length ? "（从原始输出识别）" : ""}` },
+    { id: "FR 2.0", label: "风险分析与优先级", passed: hasRiskItems, evidence: `${artifacts.riskItems?.length || 0} 条风险项${hasRiskItems && !artifacts.riskItems?.length ? "（从优先级/风险引用识别）" : ""}` },
+    { id: "FR 3.0", label: "黑盒测试设计", passed: uniqueMethods.size >= 3, evidence: `${uniqueMethods.size} 种方法，缺失: ${quality.missingMethods.join(", ") || "无"}` },
+    { id: "FR 6.0", label: "输出与导出", passed: true, evidence: "前端支持 Markdown/JSON/CSV，后端支持 /api/export" },
+    { id: "Interactive Review", label: "交互式审查", passed: hasCoverageItems || hasTraceability, evidence: "覆盖项、风险、用例、追溯关系可在前端编辑" },
+    { id: "FR 4.0", label: "白盒建模", passed: hasStateModel, evidence: hasStateModel ? "已生成状态模型" : "未生成状态模型" },
+    { id: "FR 5.0", label: "测试预言", passed: hasOracle, evidence: hasOracle ? "至少一个用例包含 oracle" : "未生成 oracle" },
+    { id: "FR 7.0", label: "测试套件优化", passed: hasOptimization, evidence: hasOptimization ? "已生成优化信息" : "未生成优化信息" }
+  ];
+
+  const required = items.filter((item) => !["FR 4.0", "FR 5.0", "FR 7.0"].includes(item.id));
+  const requiredPassed = required.filter((item) => item.passed).length;
+
+  return {
+    targetApplication,
+    requiredScore: Number((requiredPassed / required.length).toFixed(2)),
+    items
   };
 }
 
@@ -116,10 +196,14 @@ app.use(express.json({ limit: "10mb" }));
 app.get("/health", async (_req, res) => {
   try {
     await pool.query("SELECT 1");
-    res.json({ status: "ok", service: "backend" });
+    res.json({ status: "ok", service: "backend", targetApplication: targetApplication.name });
   } catch (error) {
     res.status(500).json({ status: "error", message: error.message });
   }
+});
+
+app.get("/api/target-application", (_req, res) => {
+  res.json(targetApplication);
 });
 
 app.post("/api/testcases/generate", async (req, res) => {
@@ -130,18 +214,17 @@ app.post("/api/testcases/generate", async (req, res) => {
       promptMode = "default",
       customPrompt = "",
       documents = [],
-      testTechnique = process.env.TEST_TECHNIQUE || "black-box"
+      testTechnique = process.env.TEST_TECHNIQUE || "black-box",
+      includeWhitebox = false,
+      includeOracle = false,
+      includeOptimization = false,
+      whiteboxDescription = "",
+      coverageCriterion = "all-states"
     } = req.body || {};
 
     if (!["requirements", "codebase"].includes(sourceType)) {
       return res.status(400).json({
         message: "sourceType must be requirements or codebase"
-      });
-    }
-
-    if (testTechnique !== "black-box") {
-      return res.status(400).json({
-        message: "Only black-box testing is supported in this project"
       });
     }
 
@@ -159,7 +242,12 @@ app.post("/api/testcases/generate", async (req, res) => {
       promptMode,
       customPrompt,
       documents,
-      testTechnique: "black-box"
+      testTechnique,
+      includeWhitebox,
+      includeOracle,
+      includeOptimization,
+      whiteboxDescription,
+      coverageCriterion
     });
 
     const generated = aiResponse.data;
@@ -170,6 +258,7 @@ app.post("/api/testcases/generate", async (req, res) => {
       ? String(content).slice(0, 500)
       : `files: ${summaryFromDocs}`.slice(0, 500);
     const quality = analyzeBlackBoxQuality(generated?.testcases || []);
+    const assignmentCompliance = buildAssignmentCompliance(generated, quality);
     const record = await insertGenerationRecord(
       sourceType,
       sourceSummary,
@@ -177,14 +266,16 @@ app.post("/api/testcases/generate", async (req, res) => {
       {
         qualityScore: quality.qualityScore,
         tokensEstimate: Math.ceil((String(content).length + JSON.stringify(documents || []).length) / 4)
-      }
+      },
+      testTechnique
     );
 
     res.json({
-      message: "Black-box test cases generated",
-      technique: "black-box",
+      message: "AutoTestDesign artifacts generated",
+      technique: testTechnique,
       record,
       quality,
+      assignmentCompliance,
       llmRawOutput: generated?.llmRawOutput || "",
       artifacts: generated?.artifacts || {},
       prompt: {
@@ -241,6 +332,12 @@ app.get("/api/history", async (req, res) => {
         llmRawOutput: item.llm_raw_output || "",
         tokensEstimate: Number(item.tokens_estimate || 0),
         createdAt: item.created_at,
+        structuredRequirements: item.structured_requirements || [],
+        coverageItems: item.coverage_items || [],
+        riskItems: item.risk_items || [],
+        stateModel: item.state_model || {},
+        suiteOptimization: item.suite_optimization || {},
+        traceability: item.traceability || [],
         quality: {
           ...quality,
           qualityScore: Number(item.quality_score || quality.qualityScore || 0)
@@ -285,6 +382,56 @@ app.delete("/api/history/:id", async (req, res) => {
   } catch (error) {
     res.status(500).json({
       message: "Failed to delete history record",
+      detail: error.message
+    });
+  }
+});
+
+app.get("/api/export", async (req, res) => {
+  try {
+    const format = String(req.query.format || "json").toLowerCase();
+    const limit = Math.min(Math.max(Number(req.query.limit || 100), 1), 1000);
+    const records = await getRecentGenerationRecords(limit);
+
+    if (format === "csv") {
+      const header = [
+        "id",
+        "sourceType",
+        "technique",
+        "modelName",
+        "promptVersion",
+        "qualityScore",
+        "tokensEstimate",
+        "createdAt"
+      ];
+      const rows = records.map((item) => (
+        [
+          item.id,
+          item.source_type,
+          item.technique,
+          item.model_name,
+          item.prompt_version,
+          item.quality_score,
+          item.tokens_estimate,
+          item.created_at
+        ]
+          .map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`)
+          .join(",")
+      ));
+      const csv = [header.join(","), ...rows].join("\n");
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", "attachment; filename=autotestdesign-export.csv");
+      return res.send(csv);
+    }
+
+    res.json({
+      message: "Export records",
+      count: records.length,
+      records
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Failed to export records",
       detail: error.message
     });
   }

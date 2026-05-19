@@ -37,7 +37,7 @@ body {
   padding: 10px 12px;
   height: 100vh;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
 }
 
@@ -86,6 +86,7 @@ h1 {
 .lead {
   margin: 0;
   color: var(--muted);
+  font-size: 0.88rem;
 }
 
 .status {
@@ -136,14 +137,173 @@ h1 {
   max-height: 110px;
 }
 
-.chat-stage {
+.workspace-shell {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 0;
-  position: relative;
-  z-index: 1;
+  grid-template-columns: minmax(360px, 440px) minmax(0, 1fr);
+  gap: 12px;
   min-height: 0;
-  align-items: stretch;
+  height: 100%;
+}
+
+.sidebar,
+.results-column {
+  min-height: 0;
+  height: 100%;
+}
+
+.sidebar {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 0px;
+  overflow: hidden;
+}
+
+.results-column {
+  display: grid;
+  min-width: 0;
+}
+
+.target-card,
+.input-card {
+  padding: 14px;
+}
+
+.target-card {
+  display: grid;
+  gap: 8px;
+}
+
+.target-grid {
+  display: grid;
+  grid-template-columns: 0.8fr 1.2fr;
+  gap: 10px;
+}
+
+.compact-chips {
+  margin: 8px 0 0;
+}
+
+.assignment-checklist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.check-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(45, 124, 246, 0.22);
+  background: rgba(45, 124, 246, 0.08);
+  color: #1f5f94;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.assignment-panel {
+  border: 1px solid rgba(45, 124, 246, 0.2);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(240, 248, 255, 0.76);
+}
+
+.assignment-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.compliance-pill {
+  display: inline-flex;
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(224, 107, 45, 0.28);
+  background: rgba(224, 107, 45, 0.1);
+  color: #8c4b20;
+  font-size: 0.78rem;
+  font-weight: 700;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.2;
+}
+
+.compliance-pill.passed {
+  border-color: rgba(30, 159, 110, 0.28);
+  background: rgba(30, 159, 110, 0.1);
+  color: #0f6f4b;
+}
+
+.input-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.input-card {
+  min-height: 0;
+  overflow: auto;
+}
+
+.button-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.side-files {
+  max-height: 118px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.prompt-textarea {
+  min-height: 190px;
+  max-height: 320px;
+}
+
+.advanced-options {
+  margin: 12px 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.advanced-options summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: #254e78;
+}
+
+.option-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.inline-toggles {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.generate-btn {
+  box-shadow: none;
+}
+
+.generate-card {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  padding: 4px 0 6px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 
 .panel {
@@ -189,12 +349,26 @@ h1 {
   align-items: flex-start;
   gap: 10px;
   margin-bottom: 10px;
+  flex-wrap: wrap;
 }
 
 .result-tools {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(15, 155, 142, 0.12);
+  color: #0f5f58;
+  font-size: 0.78rem;
+  font-weight: 600;
 }
 
 .export-main-btn {
@@ -245,6 +419,37 @@ textarea {
   line-height: 1.5;
 }
 
+.compact-textarea {
+  min-height: 90px;
+}
+
+.short-textarea {
+  min-height: 130px;
+  max-height: 240px;
+}
+
+.toggle-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.toggle-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.toggle-item input {
+  width: auto;
+  margin: 0;
+}
+
 button {
   border: 1px solid transparent;
   background: linear-gradient(120deg, var(--accent), var(--accent-2));
@@ -257,7 +462,7 @@ button {
 
 button:not(:disabled):hover {
   transform: translateY(-1px);
-  box-shadow: 0 8px 18px rgba(19, 91, 129, 0.24);
+  box-shadow: none;
 }
 
 button:disabled {
@@ -356,6 +561,7 @@ button:disabled {
   min-height: 0;
   height: auto;
   overflow: auto;
+  font-size: 0.9rem;
 }
 
 .request-note {
@@ -398,6 +604,42 @@ button:disabled {
   overflow: auto;
   color: #253e52;
   line-height: 1.55;
+  font-size: 0.92rem;
+}
+
+.collapsible {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.collapsible summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #254e78;
+  list-style: none;
+}
+
+.collapsible summary::-webkit-details-marker {
+  display: none;
+}
+
+.collapsible summary::after {
+  content: "▸";
+  float: right;
+  transform: translateY(1px);
+}
+
+.collapsible[open] summary::after {
+  content: "▾";
+}
+
+.review-actions {
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .markdown-body table {
@@ -428,7 +670,7 @@ button:disabled {
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(110px, 1fr));
   gap: 10px;
   margin-bottom: 10px;
 }
@@ -663,9 +905,28 @@ button:disabled {
     align-items: stretch;
   }
 
+  .workspace-shell,
+  .target-grid,
+  .input-grid,
+  .option-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-shell {
+    grid-template-rows: minmax(360px, 0.9fr) minmax(420px, 1.1fr);
+  }
+
+  .sidebar {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
   .topbar-actions {
     justify-content: flex-start;
     flex-wrap: wrap;
+  }
+
+  .metrics {
+    grid-template-columns: repeat(3, 1fr);
   }
 
   .settings-popover {
@@ -698,8 +959,13 @@ button:disabled {
 
   .result-tools {
     width: 100%;
-    justify-content: flex-end;
+    justify-content: flex-start;
     flex-wrap: wrap;
+  }
+
+  .button-row,
+  .inline-toggles {
+    grid-template-columns: 1fr;
   }
 
   .composer-row {
