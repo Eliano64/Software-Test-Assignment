@@ -1013,7 +1013,7 @@ onBeforeUnmount(() => {
     <header class="topbar">
       <div>
         <p class="eyebrow">Assignment2 AutoTestDesign Studio</p>
-        <h1>FitnessAI Test Design Workspace</h1>
+        <h1>Auto Test Design Workspace</h1>
         <p class="lead">Generate risks, coverage, test cases, oracles, white-box models, and optimized suites for the target app.</p>
       </div>
       <p class="status">{{ status }}</p>
@@ -1097,7 +1097,7 @@ onBeforeUnmount(() => {
           />
 
           <div class="button-row">
-            <button class="ghost" :disabled="loading" @click="openFilePicker">Upload FitnessAI Docs</button>
+            <button class="ghost" :disabled="loading" @click="openFilePicker">Upload Docs</button>
             <button class="ghost" @click="loadFitnessSample">Load Sample</button>
             <button class="ghost" @click="clearTextInputs">Clear Text</button>
           </div>
@@ -1116,7 +1116,7 @@ onBeforeUnmount(() => {
               v-model="chatPrompt"
               rows="8"
               class="prompt-textarea"
-              placeholder="Describe your LLM instructions. If FitnessAI_LLM_CONTEXT.md is uploaded, a short version is enough."
+              placeholder="Describe your LLM instructions. If LLM_CONTEXT.md is uploaded, a short version is enough."
             ></textarea>
           </label>
 
@@ -1125,7 +1125,7 @@ onBeforeUnmount(() => {
             <textarea
               class="short-textarea"
               v-model="manualRequirementText"
-              placeholder="Paste FitnessAI requirements, API notes, or user stories..."
+              placeholder="Paste requirements, API notes, or user stories..."
               rows="5"
             ></textarea>
           </label>
@@ -1174,7 +1174,7 @@ onBeforeUnmount(() => {
             </div>
             <label>
               White-box Model Description (Optional)
-              <textarea class="compact-textarea" v-model="whiteboxDescription" placeholder="e.g., UP -> DESCENDING -> DOWN -> ASCENDING -> UP" rows="3"></textarea>
+              <textarea class="compact-textarea" v-model="whiteboxDescription" placeholder="Describe the white-box model..." rows="3"></textarea>
             </label>
           </details>
 
@@ -1307,7 +1307,7 @@ onBeforeUnmount(() => {
           <div>
             <p class="eyebrow">Result Workspace</p>
             <h2>Waiting for Test Design</h2>
-            <p class="msg">Upload FitnessAI_LLM_CONTEXT.md or enter requirements, then click Generate Test Design. After generation, this area shows quality metrics, structured artifacts, test cases, and editable review panels.</p>
+            <p class="msg">Upload LLM_CONTEXT.md or enter requirements, then click Generate Test Design. After generation, this area shows quality metrics, structured artifacts, test cases, and editable review panels.</p>
           </div>
         </article>
       </section>
