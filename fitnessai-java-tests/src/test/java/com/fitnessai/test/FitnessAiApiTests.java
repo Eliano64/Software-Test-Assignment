@@ -1002,7 +1002,7 @@ public class FitnessAiApiTests {
     @DisplayName("TC-DT-015")
     @Feature("Exercise Records")
     @Story("Decision Table")
-    @Description("决策表-推荐计划-medium难度与不跳过休息组合")
+    @Description("决策表-推荐计划-hard难度与不跳过休息组合")
     public void test_TC_DT_015() throws Exception {
         mockMvc.perform(get("/api/exercises"))
                 .andExpect(status().isOk())
